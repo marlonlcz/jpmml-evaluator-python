@@ -1,4 +1,5 @@
 import pickle
+import os
 
 from abc import abstractmethod, abstractclassmethod, ABC
 from importlib.resources import files
@@ -232,6 +233,12 @@ class LoadingModelEvaluatorBuilder(BaseModelEvaluatorBuilder):
 		self.javaModelEvaluatorBuilder.load(file)
 		return self
 
+	def LoadStr(self, s):
+		model = self.backend.newObject("java.lang.String", s)
+		model_stream = self.backend.newObject("java.io.ByteArrayInputStream", model.getBytes())
+		self.javaModelEvaluatorBuilder.load(model_stream)
+		return self
+
 	def transform(self, javaPMMLTransformer):
 		self.javaModelEvaluatorBuilder.transform(javaPMMLTransformer)
 		return self
@@ -261,13 +268,13 @@ def make_backend(alias):
 		aliases = ["jpype", "pyjnius", "py4j"]
 		raise ValueError("Java backend alias {0} not in {1}".format(alias, aliases))
 
-def make_evaluator(path, backend = "jpype", lax = False, locatable = False, reporting = False, transpile = False):
+def make_evaluator(obj, backend = "jpype", lax = False, locatable = False, reporting = False, transpile = False):
 	""" Builds an Evaluator based on a PMML file.
 
 	Parameters:
 	----------
-	path: string
-		The path to the PMML file in local filesystem.
+	obj: string/bytes
+		The path to the PMML file in local filesystem, a string(pmml), or an array of bytes(bytes or bytearray)
 
 	backend: JavaBackend or string
 		The Java backend or its alias
@@ -292,10 +299,25 @@ def make_evaluator(path, backend = "jpype", lax = False, locatable = False, repo
 		backend = make_backend(backend)
 	else:
 		raise TypeError()
+	model_obj = obj
+	if hasattr(obj, 'read') and callable(obj.read):
+		model_obj = obj.read()
 
-	evaluatorBuilder = LoadingModelEvaluatorBuilder(backend, lax) \
-		.setLocatable(locatable) \
-		.loadFile(path)
+	if isinstance(model_obj, (bytes, bytearray)):
+		model_obj = model_obj.decode('utf-8')
+
+	if isinstance(model_obj, (str, u"".__class__)):
+		if os.path.exists(model_obj):
+			evaluatorBuilder = LoadingModelEvaluatorBuilder(backend, lax) \
+				.setLocatable(locatable) \
+				.loadFile(model_obj)
+		else:
+			evaluatorBuilder = LoadingModelEvaluatorBuilder(backend, lax) \
+				.setLocatable(locatable) \
+				.loadStr(model_obj)
+	else:
+		raise ValueError('Input type "{type}" not supported'.format(type=type(model_obj).__name__))
+
 	if reporting:
 		evaluatorBuilder.setReportingValueFactoryFactory()
 	if transpile:
